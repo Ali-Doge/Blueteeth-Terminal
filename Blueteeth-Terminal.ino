@@ -7,7 +7,7 @@
 
 #include "BluetoothSerial.h"
 
-String device_name = "Blueteeth-Terminal";
+String device_name = "BlueteethTerminalSerialLibrary";
 
 // Check if Bluetooth is available
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
