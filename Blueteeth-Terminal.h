@@ -4,4 +4,4 @@
 #include "BLE2902.h"
 #include "ctype.h"
 
-#define MAX_INPUT_BUFFER 100
+
