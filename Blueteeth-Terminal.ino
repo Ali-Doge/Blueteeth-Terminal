@@ -44,6 +44,7 @@ void receiveFromMaster()
   int bufferPos = 0;
   while (masterDataIncoming)
   {
+    vTaskDelay(1);
     if (Serial.available() && bufferPos < MAX_INPUT_BUFFER)
     {
       inputBuffer[bufferPos] = Serial.read();
@@ -77,96 +78,16 @@ void receiveFromMaster()
 void terminalInput(string input)
 {
   String masterResponse;
-  if (input.compare("help") == 0)
-  {
-    pTxCharacteristic->setValue(
-      "Available commands: ping, scan, select, list, connect, disconnect\n\r \
-      BlueteethTerminal\n\r \
-      help - Show this help\n\r \
-      ping - Ping the slaves to get the BlueteethSlaveAddresses\n\r \
-      scan - Scan for speakers\n\r \
-      select a,b,c - Select speakers from the scan\n\r \
-      list - Print the list of the selected speakers as an enumerated map\n\r \
-      connect - Send the the list to BlueteethMaster and connect to the selected speakers\n\r \
-      disconnect - Disconnect a speaker from the list\n\r");
-  }
-  else if (input.compare("ping") == 0)
-  {
-    // UART ping request sent to Master
-    Serial.println("ping\n\r");
+  Serial.println(input.c_str());
 
-    // Wait for response from Master
-    masterDataIncoming = true;
-    // TODO: change wdt timeout
-    receiveFromMaster();
-    masterResponse = inputBuffer;
+  // Wait for response from Master
+  masterDataIncoming = true;
+  // TODO: change wdt timeout
+  receiveFromMaster();
+  masterResponse = inputBuffer;
 
-    Serial.printf("DEBUG: Entered data: %s \n\r", masterResponse);
-    pTxCharacteristic->setValue(masterResponse.c_str());
-  }
-  else if (input.compare("scan") == 0)
-  {
-    Serial.println("DEBUG: Scanning for speakers...");
-
-    pTxCharacteristic->setValue("scan command");
-
-    scanFlag = true;
-    while (scanFlag)
-    {
-      // Wait until scanTask resets the flag
-      Serial.printf("DEBUG: Waiting to switch for the scan task..., current scanFlag: %d\n\r", scanFlag);
-      delay(6000);
-    }
-    int count = foundDevices.getCount();
-    Serial.print("Found ");
-    Serial.print(count);
-    Serial.println(" devices");
-    for (int i = 0; i < count; i++)
-    {
-      BLEAdvertisedDevice d = foundDevices.getDevice(i);
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.print(d.getAddress().toString().c_str());
-      Serial.print(" ");
-      Serial.println(d.getName().c_str());
-    }
-
-    // If the server dies - reconnect to the last connected device
-    if (!deviceConnected)
-    {
-      Serial.println("DEBUG: Restarting advertising...");
-      pServer->startAdvertising(); // restart advertising
-    }
-  }
-  else if (input.compare("select") == 0)
-  {
-    Serial.println("DEBUG: Selecting speakers...");
-    pTxCharacteristic->setValue("select command");
-    // select();
-  }
-  else if (input.compare("list") == 0)
-  {
-    Serial.println("DEBUG: Listing speakers...");
-    pTxCharacteristic->setValue("list command");
-    // list();
-  }
-  else if (input.compare("connect") == 0)
-  {
-    Serial.println("Connecting to speakers...");
-    pTxCharacteristic->setValue("connect command");
-
-    // connect(); //Send connect requests via UART 1-by-1 with the directive "connect BlueteethAddress,SpeakerName""
-  }
-  else if (input.compare("disconnect") == 0)
-  {
-    Serial.println("Disconnecting from speakers...");
-    // disconnect(); //However this is done
-  }
-  else
-  {
-    Serial.println("DEBUG: Invalid command");
-    pTxCharacteristic->setValue("Invalid command");
-  }
+  Serial.printf("DEBUG: Entered data: %s \n\r", masterResponse);
+  pTxCharacteristic->setValue(masterResponse.c_str());
 }
 
 class MyServerCallbacks : public BLEServerCallbacks
@@ -212,9 +133,10 @@ void bleServerSetup()
   pTxCharacteristic = pService->createCharacteristic(
       CHARACTERISTIC_UUID,
       BLECharacteristic::PROPERTY_READ |
-          BLECharacteristic::PROPERTY_WRITE |
-          BLECharacteristic::PROPERTY_NOTIFY |
-          BLECharacteristic::PROPERTY_INDICATE);
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_NOTIFY |
+      BLECharacteristic::PROPERTY_INDICATE
+      );
 
   BLEDescriptor *pTxNameDescriptor = new BLEDescriptor(BLEUUID((uint16_t)0x2901));
   pTxNameDescriptor->setValue("BlueteethTerminal");
@@ -242,41 +164,13 @@ void setup()
   Serial.println("Starting BLE work!");
   Serial.println("Advertising as BlueteethTerminal to connect to a phone...");
 
-  masterUartMutex = xSemaphoreCreateMutex();
 
   // Create the BLE Device
   BLEDevice::init("BlueteethTerminal");
-  pBLEScan = BLEDevice::getScan(); // create new scan
   bleServerSetup();
-
-  xTaskCreate(
-      scanTask,       /* Task function. */
-      "ScanTask",     /* String with name of task. */
-      4096,           /* Stack size in bytes. */
-      NULL,           /* Parameter passed as input of the task */
-      1,              /* Priority of the task. */
-      &scanTaskHandle /* Task handle. */
-  );
 }
 
 void loop()
 {
 }
 
-/*
- * Scan for BLE servers and find the first one that advertises the service we are looking for.
- */
-void scanTask(void *params)
-{
-  while (1)
-  {
-    vTaskDelay(1000);
-    if (scanFlag)
-    {
-      Serial.println("DEBUG: SetFlag found, starting active scan...");
-      foundDevices = pBLEScan->start(2); // 2 second scan duration
-      Serial.println("DEBUG: Scan done, setting flag to false");
-      scanFlag = false;
-    }
-  }
-}
