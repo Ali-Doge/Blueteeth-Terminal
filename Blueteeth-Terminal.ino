@@ -4,22 +4,17 @@ using namespace std;
 
 // Master UART variables
 char inputBuffer[MAX_INPUT_BUFFER];
-SemaphoreHandle_t masterUartMutex;
-TaskHandle_t scanTaskHandle;
 
 // BLE Terminal constants
 BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-bool terminalDataIncoming = false;
+bool scannerDataIncoming = false;
 bool masterDataIncoming = false;
 uint8_t txValue = 0;
 
 // BLE Scanning variables
-BLEScan *pBLEScan = NULL;
-bool scanFlag = false;
-BLEScanResults foundDevices;
 
 #define SERVICE_UUID "33bf5a58-a402-425c-9133-75bbb8ec7de5" // UART service UUID
 #define CHARACTERISTIC_UUID "33bf5a58-a402-425c-9133-75bbb8ec7de5"
@@ -38,27 +33,27 @@ void clear_buffer(char *buffer, int length)
 * Receive data from the Master UART - Master needs to send data fairly fast - within 5 seconds,
 * otherwise the Watchdog timer will reset the ESP32
 */
-void receiveFromMaster()
+void receiveFromSerial(HardwareSerial serial, bool serialFlag)
 {
   clear_buffer(inputBuffer, MAX_INPUT_BUFFER);
   int bufferPos = 0;
-  while (masterDataIncoming)
+  while (serialFlag)
   {
     vTaskDelay(1);
-    if (Serial.available() && bufferPos < MAX_INPUT_BUFFER)
+    if (serial.available() && bufferPos < MAX_INPUT_BUFFER)
     {
-      inputBuffer[bufferPos] = Serial.read();
+      inputBuffer[bufferPos] = serial.read();
       if (inputBuffer[bufferPos] == '\r')
       {
         inputBuffer[bufferPos] = '\0';
-        Serial.print("\n\r");
+        serial.print("\n\r");
         bufferPos = -1;
-        masterDataIncoming = false;
+        serialFlag = false;
       }
 
       else if (inputBuffer[bufferPos] == 127)
       {                                // handle a backspace character
-        Serial.printf("%c", 127);      // print out backspace
+        serial.printf("%c", 127);      // print out backspace
         inputBuffer[bufferPos] = '\0'; // clear the backspace
         if (bufferPos > 0)
           inputBuffer[--bufferPos] = '\0'; // clear the previous buffer pos if there was another character in the buffer that wasn't a backspace
@@ -66,7 +61,7 @@ void receiveFromMaster()
       }
 
       else
-        Serial.printf("%c", inputBuffer[bufferPos]);
+        serial.printf("%c", inputBuffer[bufferPos]);
       bufferPos++;
     }
   }
@@ -78,16 +73,23 @@ void receiveFromMaster()
 void terminalInput(string input)
 {
   String masterResponse;
-  Serial.println(input.c_str());
+  if (input.compare("scan") == 0) {
+    Serial2.println("s");
+    // Wait for response from Scanner
+    scannerDataIncoming = true;
+    receiveFromSerial(Serial2, scannerDataIncoming);
+    // Send scanner data to the Master
+    Serial.println(inputBuffer);
+  } else {
+    // Wait for response from Master
+    masterDataIncoming = true;
+    // TODO: change wdt timeout
+    receiveFromSerial(Serial, masterDataIncoming);
+    masterResponse = inputBuffer;
 
-  // Wait for response from Master
-  masterDataIncoming = true;
-  // TODO: change wdt timeout
-  receiveFromMaster();
-  masterResponse = inputBuffer;
-
-  Serial.printf("DEBUG: Entered data: %s \n\r", masterResponse);
-  pTxCharacteristic->setValue(masterResponse.c_str());
+    Serial.printf("DEBUG: Entered data: %s \n\r", masterResponse);
+    pTxCharacteristic->setValue(masterResponse.c_str());
+  }
 }
 
 class MyServerCallbacks : public BLEServerCallbacks
@@ -159,10 +161,13 @@ void bleServerSetup()
 void setup()
 {
 
-  // Start Serial comms
+  // Start Master Serial comms
   Serial.begin(115200);
   Serial.println("Starting BLE work!");
   Serial.println("Advertising as BlueteethTerminal to connect to a phone...");
+
+  // Start Scanner Serial comms
+  Serial2.begin(115200);
 
 
   // Create the BLE Device
